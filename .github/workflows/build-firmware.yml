@@ -1,0 +1,64 @@
+name: Build firmware artifacts
+
+on:
+  push:
+    branches:
+      - build-firmware-fix-clear-src-match-ext-entry
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-cc2652p:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Bootstrap build environment
+        run: |
+          sudo apt-get update
+          sudo apt-get --no-install-recommends install -y git wget sudo tzdata make zip cmake ninja-build bzip2 ca-certificates
+          bash script/bootstrap
+
+      - name: Build CC1352P2/CC2652P launchpad
+        run: |
+          mkdir -p dist
+          rm -rf build
+          CC1352P_2_OTHER=false FW_VERSION=2026.6.9-pr-99f0c7b ./script/build CC1352P_2_LAUNCHXL
+          arm-none-eabi-objcopy -O ihex build/bin/ot-rcp.out dist/CC1352P2_CC2652P_launchpad_ot_rcp_2026_6_9_pr_99f0c7b.hex
+
+      - name: Build CC1352P2/CC2652P other
+        run: |
+          rm -rf build
+          CC1352P_2_OTHER=true FW_VERSION=2026.6.9-pr-99f0c7b ./script/build CC1352P_2_LAUNCHXL
+          arm-none-eabi-objcopy -O ihex build/bin/ot-rcp.out dist/CC1352P2_CC2652P_other_ot_rcp_2026_6_9_pr_99f0c7b.hex
+
+      - name: Checksums
+        run: |
+          sha256sum dist/*.hex | tee dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cc2652p-ot-rcp-2026-6-9-pr-99f0c7b
+          path: dist/*
+
+      - name: Publish artifacts branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/firmware-dist
+          cp dist/* /tmp/firmware-dist/
+          mkdir -p /tmp/firmware-repo
+          cd /tmp/firmware-repo
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          cp /tmp/firmware-dist/* .
+          git add .
+          git commit -m "Add firmware artifacts for 99f0c7b [skip ci]"
+          git branch -M firmware-artifacts-99f0c7b
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git push --force origin firmware-artifacts-99f0c7b
